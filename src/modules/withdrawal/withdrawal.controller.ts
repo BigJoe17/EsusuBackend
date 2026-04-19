@@ -51,7 +51,7 @@ export class WithdrawalController {
    */
   static async approveWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const withdrawal = await WithdrawalService.approveWithdrawal(id);
 
       res.status(200).json({
@@ -76,7 +76,7 @@ export class WithdrawalController {
    */
   static async rejectWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const withdrawal = await WithdrawalService.rejectWithdrawal(id);
 
       res.status(200).json({

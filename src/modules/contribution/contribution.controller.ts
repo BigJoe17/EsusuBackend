@@ -56,7 +56,7 @@ export class ContributionController {
    */
   static async approveContribution(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const contribution = await ContributionService.approveContribution(id, req.user!.userId);
 
       res.status(200).json({
@@ -82,7 +82,7 @@ export class ContributionController {
    */
   static async rejectContribution(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const { reason } = req.body;
 
       const contribution = await ContributionService.rejectContribution(
@@ -114,7 +114,7 @@ export class ContributionController {
    */
   static async approveBatch(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { batchId } = req.params;
+      const batchId = req.params.batchId as string;
       const result = await ContributionService.approveBatch(batchId, req.user!.userId);
 
       res.status(200).json({
@@ -138,7 +138,7 @@ export class ContributionController {
    */
   static async rejectBatch(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { batchId } = req.params;
+      const batchId = req.params.batchId as string;
       const { reason } = req.body;
       const result = await ContributionService.rejectBatch(batchId, req.user!.userId, reason);
 

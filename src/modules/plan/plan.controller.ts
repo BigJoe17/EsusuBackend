@@ -58,7 +58,7 @@ export class PlanController {
    */
   static async getPlanSchedule(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const isAdmin = req.user!.role === "ADMIN";
       const schedule = await PlanService.getPlanSchedule(id, isAdmin ? undefined : req.user!.userId);
       res.status(200).json({ success: true, ...schedule });

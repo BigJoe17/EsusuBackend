@@ -22,14 +22,12 @@ cron.schedule('0 1 * * *', async () => {
       _count: {
         id: true,
       },
-      having: {
-        id: {
-          gte: 2,
-        },
-      },
     });
 
-    for (const group of missedContributions) {
+    // Filter for 2 or more missed payments
+    const defaulters = missedContributions.filter(g => (g._count?.id ?? 0) >= 2);
+
+    for (const group of defaulters) {
       const plan = await prisma.savingsPlan.findUnique({
         where: { id: group.planId },
         include: { user: true }
@@ -66,7 +64,7 @@ cron.schedule('0 1 * * *', async () => {
       });
 
       // 3. Create Notification
-      const bodyStr = `You have missed ${group._count.id} scheduled payments for your active savings plan. A penalty of ₦${penaltyAmount} has been recorded. Please process your payments immediately.`;
+      const bodyStr = `You have missed ${group._count?.id ?? 0} scheduled payments for your active savings plan. A penalty of ₦${penaltyAmount} has been recorded. Please process your payments immediately.`;
       
       await prisma.notification.create({
         data: {

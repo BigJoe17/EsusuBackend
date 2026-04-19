@@ -9,6 +9,7 @@ import {
 } from "../utils/validation";
 import { ValidationError } from "../middleware/error.middleware";
 import { logger } from "../utils/logger";
+import bcrypt from "bcrypt";
 
 export class AuthController {
   /**

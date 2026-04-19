@@ -27,7 +27,7 @@ export class NotificationController {
    */
   static async markAsRead(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const userId = req.user!.userId;
 
       const notification = await prisma.notification.findUnique({
