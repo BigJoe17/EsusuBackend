@@ -1,0 +1,178 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum PlanStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum ContributionStatus {
+  UNPAID
+  PENDING
+  APPROVED
+  REJECTED
+  MISSED
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum EarningSource {
+  INTEREST
+  FEE
+  PENALTY
+}
+
+enum NotificationChannel {
+  APP
+  SMS
+  EMAIL
+}
+
+enum NotificationType {
+  INFO
+  ALERT
+  REMINDER
+}
+
+// ─── Models ───────────────────────────────────────────────────────
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  password   String
+  name       String?
+  role       Role     @default(USER)
+  isVerified Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  otpCodes              OtpCode[]
+  plans                 SavingsPlan[]
+  approvedContributions Contribution[] @relation("ContributionApprover")
+  notifications         Notification[]
+}
+
+model OtpCode {
+  id        String   @id @default(uuid())
+  code      String
+  userId    String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model SavingsPlan {
+  id             String     @id @default(uuid())
+  userId         String
+  dailyAmount    Float
+  cycleLength    Int        @default(31)
+  durationMonths Int        // 1, 3, 6, or 24
+  startDate      DateTime
+  endDate        DateTime
+  isActive       Boolean    @default(true)
+  status         PlanStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contributions Contribution[]
+  withdrawals   Withdrawal[]
+
+  @@index([userId])
+}
+
+model Contribution {
+  id              String             @id @default(uuid())
+  planId          String
+  date            DateTime           // the day this contribution is for
+  amount          Float
+  status          ContributionStatus @default(UNPAID)
+  method          PaymentMethod?     // cash or transfer
+  proofUrl        String?            // receipt/screenshot URL
+  reference       String?            // transfer reference or receipt number
+  batchId         String?            // groups bulk payments together
+  approvedById    String?            // admin who approved/rejected
+  approvedAt      DateTime?          // when it was approved/rejected
+  rejectionReason String?            // why it was rejected
+  createdAt       DateTime           @default(now())
+
+  plan       SavingsPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  approvedBy User?       @relation("ContributionApprover", fields: [approvedById], references: [id])
+
+  @@unique([planId, date]) // one contribution per day per plan
+  @@index([planId])
+  @@index([batchId])
+  @@index([status])
+}
+
+model Withdrawal {
+  id        String           @id @default(uuid())
+  planId    String
+  amount    Float
+  status    WithdrawalStatus @default(PENDING)
+  createdAt DateTime         @default(now())
+
+  plan SavingsPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+}
+
+model AdminEarning {
+  id          String        @id @default(uuid())
+  sourceType  EarningSource
+  sourceId    String        // Related to Contribution or Withdrawal ID
+  amount      Float
+  description String?
+  recordedAt  DateTime      @default(now())
+}
+
+model Notification {
+  id        String              @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  type      NotificationType    @default(INFO)
+  isRead    Boolean             @default(false)
+  channel   NotificationChannel @default(APP)
+  createdAt DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AppSettings {
+  id                   String   @id @default(uuid())
+  appName              String   @default("Esusu Digital")
+  logoUrl              String?
+  primaryColor         String   @default("#10b981") // Emerald 500
+  secondaryColor       String   @default("#f8fafc") // Slate 50
+  adminFeeDays         Int      @default(30)
+  allowSignup          Boolean  @default(true)
+  notificationsEnabled Boolean  @default(true)
+  updatedAt            DateTime @updatedAt
+}
