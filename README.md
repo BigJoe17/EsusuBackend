@@ -5,27 +5,21 @@ A robust Node.js/Express backend for managing microfinance rotating savings and 
 ## Features
 
 - ✅ **Authentication with OTP**: Email-based OTP verification for secure registration and login
-- ✅ **User Management**: User profiles with verification status and role-based access
-- ✅ **Group Management**: Create and manage contribution groups
-- ✅ **Contributions**: Track member contributions to groups
-- ✅ **Loans**: Request and manage loans with approval workflow
-- ✅ **Transactions**: Complete transaction history and audit trail
-- ✅ **Security**: JWT authentication, password hashing, rate limiting, helmet protection
-- ✅ **Validation**: Comprehensive input validation and error handling
-- ✅ **Logging**: Structured logging with different log levels
-- ✅ **Error Handling**: Centralized error handling with custom error classes
+- ✅ **Payment Submissions**: Users upload proofs of payment (screenshots) for admin verification
+- ✅ **Automated Allocation**: Smart logic to handle savings cycles, day allocation, and admin fee collection
+- ✅ **Cloud Storage**: Seamless integration with **Cloudinary** for payment proof storage (with local fallback)
+- ✅ **Push Notifications**: Integrated with **Expo Notifications API** for real-time payment status updates
+- ✅ **Admin Dashboard API**: High-performance raw SQL queries for real-time analytics
+- ✅ **Security**: JWT authentication, rate limiting, and centralized error handling
 
 ## Tech Stack
 
-- **Runtime**: Node.js 18+
-- **Language**: TypeScript 6.0+
-- **Framework**: Express 5.x
-- **Database**: PostgreSQL 13+
+- **Runtime**: Node.js 20+
+- **Database**: PostgreSQL (Neon.tech Recommended)
 - **ORM**: Prisma 7.x
-- **Authentication**: JWT (jsonwebtoken)
-- **Password Hashing**: bcrypt
-- **Email**: Nodemailer
-- **Utilities**: dotenv, helmet, cors, morgan
+- **Storage**: Cloudinary (Image management)
+- **Notifications**: Expo Server SDK
+- **Mailing**: Resend.com / Nodemailer
 
 ## Project Structure
 
