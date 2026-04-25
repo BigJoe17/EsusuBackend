@@ -11,15 +11,15 @@ type PrismaTransaction = Omit<
 export class ContributionAllocationService {
   static async approveSubmission(submissionId: string, adminId: string) {
     const result = await prisma.$transaction(async (tx) => {
-      const submission = await tx.paymentSubmission.findUnique({
+      const submission = (await tx.paymentSubmission.findUnique({
         where: { id: submissionId },
         include: {
           plan: true,
           user: {
-            select: { id: true, name: true, email: true },
+            select: { id: true, name: true, email: true, expoPushToken: true },
           },
         },
-      });
+      })) as any;
 
       if (!submission) {
         throw new Error("Payment submission not found");
@@ -68,7 +68,7 @@ export class ContributionAllocationService {
         })
       ]);
 
-      const feeCyclesSet = new Set(
+      const feeCyclesSet = new Set<number>(
         existingFeeCycles
           .map((c) => c.cycleNumber)
           .filter((n): n is number => typeof n === "number")
@@ -166,9 +166,9 @@ export class ContributionAllocationService {
 
     // Fire push notification + create in-app notification OUTSIDE transaction
     try {
-      const submission = result?.submission;
+      const submission = result?.submission as any;
       const userId = submission?.userId;
-      const user = submission?.user as any;
+      const user = submission?.user;
       const pushToken = user?.expoPushToken;
 
       if (userId) {
