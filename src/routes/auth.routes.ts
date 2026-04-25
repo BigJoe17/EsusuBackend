@@ -4,14 +4,17 @@ import { authenticateToken } from "../middleware/auth.middleware";
 
 const router = Router();
 
-// Public routes (no auth required)
+// ─── Public Routes ─────────────────────────────────────────────────
 router.post("/register", AuthController.register);
 router.post("/login", AuthController.login);
 router.post("/verify-otp", AuthController.verifyOtp);
 router.post("/resend-otp", AuthController.resendOtp);
+router.post("/forgot-password", AuthController.forgotPassword);
+router.post("/reset-password", AuthController.resetPassword);
 
-// Protected routes (JWT required)
+// ─── Protected Routes (JWT required) ───────────────────────────────
 router.get("/me", authenticateToken as any, AuthController.getProfile as any);
 router.patch("/change-password", authenticateToken as any, AuthController.changePassword as any);
+router.post("/push-token", authenticateToken as any, AuthController.savePushToken as any);
 
 export default router;

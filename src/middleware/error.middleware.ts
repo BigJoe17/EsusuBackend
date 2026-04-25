@@ -96,6 +96,16 @@ export const errorHandler = (
     message = "Token expired";
     logger.warn("Token expired");
   }
+  // Handle Multer errors
+  else if (err.name === "MulterError") {
+    statusCode = 400;
+    if (err.code === "LIMIT_FILE_SIZE") {
+      message = "File is too large. Maximum size is 5MB.";
+    } else {
+      message = `Upload error: ${err.message}`;
+    }
+    logger.warn("Multer upload error", { code: err.code });
+  }
   // Handle other errors
   else {
     logger.error("Unhandled error", err, { path: req.path });

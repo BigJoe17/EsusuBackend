@@ -14,6 +14,7 @@ router.get("/users", AdminController.getUsers as any);
 router.get("/users/:id", AdminController.getUserById as any);
 router.get("/plans", AdminController.getPlans as any);
 router.get("/contributions", AdminController.getContributions as any);
+router.get("/withdrawals/export", AdminController.exportWithdrawals as any);
 router.get("/withdrawals", AdminController.getWithdrawals as any);
 router.get("/earnings", AdminController.getEarnings as any);
 

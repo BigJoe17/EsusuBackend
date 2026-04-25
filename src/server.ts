@@ -4,6 +4,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
+import path from "path";
 
 // Configuration & Logging
 import { config, validateEnv } from "./config/env";
@@ -17,6 +18,9 @@ import withdrawalRoutes from "./modules/withdrawal/withdrawal.routes";
 import adminRoutes from "./modules/admin/admin.routes";
 import notificationRoutes from "./modules/notification/notification.routes";
 import settingsRoutes from "./modules/settings/settings.routes";
+import uploadRoutes from "./modules/upload/upload.routes";
+import bankAccountRoutes from "./modules/bank-account/bank-account.routes";
+
 
 // Cron Jobs
 import "./jobs/cron";
@@ -34,6 +38,10 @@ try {
 }
 
 const app = express();
+
+// Trust first proxy (required for Ngrok, Render, and other reverse proxies)
+// Without this, express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+app.set('trust proxy', 1);
 
 // Security and Logging Best Practices
 app.use(
@@ -70,9 +78,12 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "ngrok-skip-browser-warning"],
   })
 );
+
+// Serve local uploads
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.use(morgan("dev"));
 app.use(express.json({ limit: "10kb" }));
@@ -109,6 +120,9 @@ app.use("/api/withdrawals", withdrawalRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/bank-account", bankAccountRoutes);
+
 
 // Catch 404 and forward to error handler
 app.use(notFoundHandler);

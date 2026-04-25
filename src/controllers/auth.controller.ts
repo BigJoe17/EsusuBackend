@@ -7,7 +7,7 @@ import {
   validateLogin,
   validateOtpVerification,
 } from "../utils/validation";
-import { ValidationError } from "../middleware/error.middleware";
+import { AuthorizationError, ValidationError } from "../middleware/error.middleware";
 import { logger } from "../utils/logger";
 import bcrypt from "bcrypt";
 
@@ -37,6 +37,8 @@ export class AuthController {
           email: req.body?.email,
         });
         res.status(409).json({ success: false, error: error.message });
+      } else if (error instanceof AuthorizationError) {
+        res.status(403).json({ success: false, error: error.message });
       } else if (error instanceof ValidationError) {
         res.status(400).json({ success: false, error: error.message, errors: error.errors });
       } else {
@@ -69,6 +71,9 @@ export class AuthController {
       if (error.message === "Invalid credentials") {
         logger.warn("Invalid login attempt", { email: req.body?.email });
         res.status(401).json({ success: false, error: error.message });
+      } else if (error.message === "Account suspended") {
+        logger.warn("Suspended login attempt blocked", { email: req.body?.email });
+        res.status(403).json({ success: false, error: error.message });
       } else if (error instanceof ValidationError) {
         res.status(400).json({ success: false, error: error.message, errors: error.errors });
       } else {
@@ -102,6 +107,7 @@ export class AuthController {
         "User not found",
         "OTP expired or not found. Please request a new one.",
         "Invalid OTP code",
+        "Account suspended",
       ];
 
       if (clientErrors.includes(error.message)) {
@@ -140,6 +146,9 @@ export class AuthController {
       if (error.message === "User not found") {
         logger.warn("Resend OTP for non-existent user", { email: req.body?.email });
         res.status(404).json({ success: false, error: error.message });
+      } else if (error.message === "Account suspended") {
+        logger.warn("Suspended resend OTP attempt blocked", { email: req.body?.email });
+        res.status(403).json({ success: false, error: error.message });
       } else if (error instanceof ValidationError) {
         res.status(400).json({ success: false, error: error.message, errors: error.errors });
       } else {
@@ -157,7 +166,7 @@ export class AuthController {
     try {
       const user = await prisma.user.findUnique({
         where: { id: req.user!.userId },
-        select: { id: true, name: true, email: true, role: true, isVerified: true, createdAt: true },
+        select: { id: true, name: true, email: true, role: true, isVerified: true, isSuspended: true, createdAt: true },
       });
 
       if (!user) {
@@ -207,6 +216,88 @@ export class AuthController {
     } catch (error: any) {
       logger.error("Change password error:", error);
       res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  }
+
+  /**
+   * POST /api/auth/push-token
+   * Save or update the authenticated user's Expo push token.
+   */
+  static async savePushToken(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { token } = req.body;
+
+      if (!token || typeof token !== "string") {
+        res.status(400).json({ success: false, error: "Push token is required" });
+        return;
+      }
+
+      await prisma.user.update({
+        where: { id: req.user!.userId },
+        data: { expoPushToken: token },
+      });
+
+      logger.info("Push token saved", { userId: req.user!.userId });
+      res.status(200).json({ success: true, message: "Push token saved" });
+    } catch (error: any) {
+      logger.error("Save push token error:", error);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  }
+
+  /**
+   * POST /api/auth/forgot-password
+   * Sends a password reset OTP to the user's email.
+   */
+  static async forgotPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        res.status(400).json({ success: false, error: "Email is required" });
+        return;
+      }
+
+      const result = await AuthService.forgotPassword(email);
+      res.status(200).json({ success: true, ...result });
+    } catch (error: any) {
+      // Always return 200 to avoid email enumeration
+      logger.warn("Forgot password attempt:", error);
+      res.status(200).json({
+        success: true,
+        message: "If an account with that email exists, a reset code has been sent.",
+      });
+    }
+  }
+
+  /**
+   * POST /api/auth/reset-password
+   * Verifies the reset OTP and sets the new password.
+   */
+  static async resetPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email, otp, newPassword } = req.body;
+
+      if (!email || !otp || !newPassword) {
+        res.status(400).json({ success: false, error: "email, otp, and newPassword are required" });
+        return;
+      }
+
+      if (newPassword.length < 8) {
+        res.status(400).json({ success: false, error: "Password must be at least 8 characters" });
+        return;
+      }
+
+      const result = await AuthService.resetPassword({ email, otp, newPassword });
+      res.status(200).json({ success: true, ...result });
+    } catch (error: any) {
+      const clientErrors = ["User not found", "OTP expired or not found. Please request a new one.", "Invalid OTP code"];
+      if (clientErrors.includes(error.message)) {
+        res.status(400).json({ success: false, error: error.message });
+      } else {
+        logger.error("Reset password error:", error);
+        res.status(500).json({ success: false, error: "Internal server error" });
+      }
     }
   }
 }

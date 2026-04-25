@@ -2,10 +2,12 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import prisma from "../utils/prisma";
 import { generateOtpCode, hashOtp, compareOtp, getOtpExpiry } from "../utils/otp.util";
-import { sendOtpEmail } from "../utils/email.util";
+import { sendOtpEmail, sendPasswordResetEmail } from "../utils/email.util";
 import { config } from "../config/env";
+
 import { logger } from "../utils/logger";
-import { ConflictError } from "../middleware/error.middleware";
+import { AuthorizationError, ConflictError } from "../middleware/error.middleware";
+import { AppSettingsService } from "./app-settings.service";
 
 const JWT_SECRET = config.JWT_SECRET;
 
@@ -17,6 +19,12 @@ export class AuthService {
    */
   static async register(data: { email: string; password: string; name?: string }) {
     const { email, password, name } = data;
+    const settings = await AppSettingsService.getRuntimeBusinessSettings();
+
+    if (!settings.allowSignup) {
+      logger.warn("Registration blocked because signup is disabled", { email });
+      throw new AuthorizationError("New registrations are currently disabled");
+    }
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -74,6 +82,11 @@ export class AuthService {
       throw new Error("Invalid credentials");
     }
 
+    if (user.isSuspended) {
+      logger.warn("Suspended user attempted login", { email, userId: user.id });
+      throw new Error("Account suspended");
+    }
+
     if (!user.isVerified) {
       logger.info("Unverified user attempted login, resending OTP", { email });
       const otpCode = await this.createAndSendOtp(user.id, user.email);
@@ -116,6 +129,11 @@ export class AuthService {
     if (!user) {
       logger.warn("OTP verification for non-existent user", { email });
       throw new Error("User not found");
+    }
+
+    if (user.isSuspended) {
+      logger.warn("Suspended user attempted OTP verification", { email, userId: user.id });
+      throw new Error("Account suspended");
     }
 
     // Find the latest unused OTP for this user
@@ -179,6 +197,10 @@ export class AuthService {
       throw new Error("User not found");
     }
 
+    if (user.isSuspended) {
+      throw new Error("Account suspended");
+    }
+
     // Invalidate all existing unused OTPs
     await prisma.otpCode.updateMany({
       where: { userId: user.id, used: false },
@@ -205,6 +227,7 @@ export class AuthService {
         name: true,
         role: true,
         isVerified: true,
+        isSuspended: true,
         createdAt: true,
         _count: {
           select: { plans: true },
@@ -235,6 +258,70 @@ export class AuthService {
       totalSaved: contributions._sum.amount || 0,
       activePlansCount: user._count.plans,
     };
+  }
+
+  /**
+   * Forgot password — send a reset OTP to user's email.
+   * Always succeeds silently to prevent email enumeration.
+   */
+  static async forgotPassword(email: string) {
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    if (!user || user.isSuspended) {
+      // Silently succeed — caller handles enumeration protection at controller level
+      return { message: "If an account with that email exists, a reset code has been sent." };
+    }
+
+    // Invalidate all existing unused OTPs
+    await prisma.otpCode.updateMany({
+      where: { userId: user.id, used: false },
+      data: { used: true },
+    });
+
+    const code = generateOtpCode();
+    const hashedCode = await hashOtp(code);
+    const expiresAt = getOtpExpiry();
+
+    await prisma.otpCode.create({
+      data: { code: hashedCode, userId: user.id, expiresAt },
+    });
+
+    await sendPasswordResetEmail(email, code);
+    logger.info("Password reset OTP sent", { email });
+
+    return {
+      message: "If an account with that email exists, a reset code has been sent.",
+      ...(config.NODE_ENV !== "production" && { otp: code }),
+    };
+  }
+
+  /**
+   * Reset password — verifies OTP and updates password.
+   */
+  static async resetPassword(data: { email: string; otp: string; newPassword: string }) {
+    const { email, otp, newPassword } = data;
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) throw new Error("User not found");
+    if (user.isSuspended) throw new Error("Account suspended");
+
+    const otpRecord = await prisma.otpCode.findFirst({
+      where: { userId: user.id, used: false, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!otpRecord) throw new Error("OTP expired or not found. Please request a new one.");
+
+    const isValid = await compareOtp(otp, otpRecord.code);
+    if (!isValid) throw new Error("Invalid OTP code");
+
+    await prisma.otpCode.update({ where: { id: otpRecord.id }, data: { used: true } });
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({ where: { id: user.id }, data: { password: hashedPassword } });
+
+    logger.info("Password reset successfully", { email });
+    return { message: "Password reset successfully. Please log in with your new password." };
   }
 
   // ─── Private Helpers ────────────────────────────────────────────

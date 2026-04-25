@@ -7,6 +7,15 @@ export class WithdrawalService {
    * Validates that the amount doesn't exceed the available balance.
    */
   static async requestWithdrawal(userId: string, planId: string, amount: number) {
+    // Check if user has a bank account linked
+    const bankAccount = await prisma.bankAccount.findUnique({
+      where: { userId }
+    });
+
+    if (!bankAccount) {
+      throw new Error("Please add a bank account first before requesting a withdrawal.");
+    }
+
     const plan = await prisma.savingsPlan.findUnique({
       where: { id: planId },
     });
@@ -25,7 +34,7 @@ export class WithdrawalService {
 
     // Calculate available balance
     const approvedContributions = await prisma.contribution.aggregate({
-      where: { planId, status: "APPROVED" },
+      where: { planId, status: "APPROVED", allocationType: "USER_SAVINGS" },
       _sum: { amount: true },
     });
 
@@ -43,22 +52,14 @@ export class WithdrawalService {
     const totalWithdrawn = approvedWithdrawals._sum.amount || 0;
     const totalPending = pendingWithdrawals._sum.amount || 0;
 
-    // Deduct admin earnings: 1 day per completed cycle
-    const daysSoFar = Math.floor(
-      (Date.now() - plan.startDate.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    const completedCycles = Math.floor(daysSoFar / plan.cycleLength);
-    const adminEarnings = completedCycles * plan.dailyAmount;
-
-    const availableBalance = totalSaved - totalWithdrawn - totalPending - adminEarnings;
+    const availableBalance = totalSaved - totalWithdrawn - totalPending;
 
     if (amount > availableBalance) {
       throw new Error(
         `Insufficient balance. Available: ₦${availableBalance.toLocaleString()}. ` +
         `(Total saved: ₦${totalSaved.toLocaleString()}, ` +
         `Withdrawn: ₦${totalWithdrawn.toLocaleString()}, ` +
-        `Pending: ₦${totalPending.toLocaleString()}, ` +
-        `Admin fee: ₦${adminEarnings.toLocaleString()})`
+        `Pending: ₦${totalPending.toLocaleString()})`
       );
     }
 
@@ -85,6 +86,27 @@ export class WithdrawalService {
       ...withdrawal,
       availableBalance: availableBalance - amount,
     };
+  }
+
+  /**
+   * Get withdrawals for a specific user.
+   */
+  static async getUserWithdrawals(userId: string) {
+    return prisma.withdrawal.findMany({
+      where: {
+        plan: { userId }
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        plan: {
+          select: {
+            id: true,
+            dailyAmount: true,
+            durationMonths: true
+          }
+        }
+      }
+    });
   }
 
   /**

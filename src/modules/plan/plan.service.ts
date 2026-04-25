@@ -1,5 +1,12 @@
 import prisma from "../../utils/prisma";
 import { logger } from "../../utils/logger";
+import { AppSettingsService } from "../../services/app-settings.service";
+import {
+  getCycleLength,
+  getPlanTotalDays,
+  getProjectedAdminEarnings,
+  getProjectedUserPayout,
+} from "../../utils/business-rules";
 
 export class PlanService {
   /**
@@ -11,6 +18,7 @@ export class PlanService {
     durationMonths: number;
   }) {
     const { dailyAmount, durationMonths } = data;
+    const settings = await AppSettingsService.getRuntimeBusinessSettings();
 
     // Validate duration
     const validDurations = [1, 3, 6, 24];
@@ -25,8 +33,8 @@ export class PlanService {
     const startDate = new Date();
     startDate.setUTCHours(0, 0, 0, 0);
 
-    // Calculate end date: durationMonths * 31 days per cycle
-    const totalDays = durationMonths * 31;
+    const cycleLength = getCycleLength(settings.adminFeeDays);
+    const totalDays = getPlanTotalDays(durationMonths, cycleLength);
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + totalDays);
 
@@ -34,7 +42,7 @@ export class PlanService {
       data: {
         userId,
         dailyAmount,
-        cycleLength: 31,
+        cycleLength,
         durationMonths,
         startDate,
         endDate,
@@ -42,16 +50,6 @@ export class PlanService {
     });
 
     logger.info("Savings plan created", { planId: plan.id, userId, dailyAmount, durationMonths });
-
-    // Generate today's first contribution record
-    await prisma.contribution.create({
-      data: {
-        planId: plan.id,
-        date: startDate,
-        amount: dailyAmount,
-        status: "PENDING",
-      },
-    });
 
     return prisma.savingsPlan.findUnique({
       where: { id: plan.id },
@@ -80,13 +78,14 @@ export class PlanService {
     const enriched = await Promise.all(
       plans.map(async (plan) => {
         const approved = await prisma.contribution.aggregate({
-          where: { planId: plan.id, status: "APPROVED" },
+          where: { planId: plan.id, status: "APPROVED", allocationType: "USER_SAVINGS" },
           _sum: { amount: true },
           _count: true,
         });
 
-        const pending = await prisma.contribution.aggregate({
-          where: { planId: plan.id, status: "PENDING" },
+        const businessFees = await prisma.contribution.aggregate({
+          where: { planId: plan.id, status: "APPROVED", allocationType: "BUSINESS_FEE" },
+          _sum: { amount: true },
           _count: true,
         });
 
@@ -95,17 +94,25 @@ export class PlanService {
           _count: true,
         });
 
-        const totalCycles = Math.ceil(plan.durationMonths * 31 / plan.cycleLength);
-        const adminEarnings = totalCycles * plan.dailyAmount; // 1 day per cycle
-        const userMaxEarnings = (plan.durationMonths * 31 * plan.dailyAmount) - adminEarnings;
+        const pendingSubmissions = await prisma.paymentSubmission.aggregate({
+          where: { planId: plan.id, status: "PENDING" },
+          _sum: { amount: true },
+          _count: true,
+        });
+
+        const adminEarnings = getProjectedAdminEarnings(plan.durationMonths, plan.dailyAmount);
+        const userMaxEarnings = getProjectedUserPayout(plan.durationMonths, plan.dailyAmount, plan.cycleLength);
 
         return {
           ...plan,
           summary: {
             totalSaved: approved._sum.amount || 0,
             approvedDays: approved._count,
-            pendingDays: pending._count,
+            pendingDays: pendingSubmissions._count,
             missedDays: missed._count,
+            feeDays: businessFees._count,
+            totalBusinessFees: businessFees._sum.amount || 0,
+            pendingSubmissionAmount: pendingSubmissions._sum.amount || 0,
             adminEarnings,
             userMaxEarnings,
           },
@@ -125,6 +132,9 @@ export class PlanService {
       include: {
         contributions: {
           orderBy: { date: "asc" },
+        },
+        paymentSubmissions: {
+          orderBy: { submittedAt: "desc" },
         },
         withdrawals: {
           orderBy: { createdAt: "desc" },
@@ -164,6 +174,8 @@ export class PlanService {
         cycleDay,
         date: dateStr,
         isAdminDay,
+        isBusinessFee: contribution?.allocationType === "BUSINESS_FEE",
+        allocationType: contribution?.allocationType || null,
         amount: plan.dailyAmount,
         status: contribution?.status || (new Date(dateStr) < new Date() ? "MISSED" : "UNPAID"),
         method: contribution?.method || null,
@@ -176,8 +188,14 @@ export class PlanService {
 
     // Calculate totals
     const approved = await prisma.contribution.aggregate({
-      where: { planId, status: "APPROVED" },
+      where: { planId, status: "APPROVED", allocationType: "USER_SAVINGS" },
       _sum: { amount: true },
+    });
+
+    const businessFees = await prisma.contribution.aggregate({
+      where: { planId, status: "APPROVED", allocationType: "BUSINESS_FEE" },
+      _sum: { amount: true },
+      _count: true,
     });
 
     const withdrawn = await prisma.withdrawal.aggregate({
@@ -200,9 +218,12 @@ export class PlanService {
       schedule,
       totals: {
         totalSaved: approved._sum.amount || 0,
+        totalBusinessFees: businessFees._sum.amount || 0,
+        feeDays: businessFees._count,
         totalWithdrawn: withdrawn._sum.amount || 0,
         availableBalance: (approved._sum.amount || 0) - (withdrawn._sum.amount || 0),
       },
+      paymentSubmissions: plan.paymentSubmissions,
       withdrawals: plan.withdrawals,
     };
   }

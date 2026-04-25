@@ -1,157 +1,129 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../../middleware/auth.middleware";
 import { ContributionService } from "./contribution.service";
+import { PaymentSubmissionService } from "./payment-submission.service";
+import { ContributionAllocationService } from "./contribution-allocation.service";
 import { logger } from "../../utils/logger";
 
 export class ContributionController {
   /**
    * POST /api/contributions/pay
-   * User records a payment. Status = PENDING until admin approves.
-   *
-   * Body: { planId, amount?, method?, proofUrl?, reference? }
+   * User submits a payment request for admin review.
    */
   static async payContribution(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { planId, amount, method, proofUrl, reference } = req.body;
+      const { planId, amount, method, proofUrl, reference, selectedStartDate } = req.body;
 
       if (!planId) {
         res.status(400).json({ success: false, error: "planId is required" });
         return;
       }
 
-      const result = await ContributionService.payContribution(
-        req.user!.userId,
-        planId,
-        {
-          amount: amount ? parseFloat(amount) : undefined,
-          method: method?.toUpperCase(),
-          proofUrl,
-          reference,
-        }
-      );
+      if (!amount) {
+        res.status(400).json({ success: false, error: "amount is required" });
+        return;
+      }
+
+      if (!method) {
+        res.status(400).json({ success: false, error: "method is required" });
+        return;
+      }
+
+      if (!selectedStartDate) {
+        res.status(400).json({ success: false, error: "selectedStartDate is required" });
+        return;
+      }
+
+      const submission = await PaymentSubmissionService.createSubmission(req.user!.userId, planId, {
+        amount: parseFloat(amount),
+        method: method?.toUpperCase(),
+        proofUrl,
+        reference,
+        selectedStartDate: new Date(selectedStartDate),
+      });
 
       res.status(201).json({
         success: true,
-        message: `${result.daysPaid} day${result.daysPaid > 1 ? "s" : ""} recorded. Awaiting admin verification.`,
-        ...result,
+        message: `${submission.daysCovered} day${submission.daysCovered > 1 ? "s" : ""} submitted for review. Awaiting admin verification.`,
+        submission,
       });
     } catch (error: any) {
       const clientErrors = [
-        "Plan not found", "do not own", "no longer active",
-        "outside the plan", "must be divisible", "must be greater",
-        "Not enough unpaid",
+        "Plan not found",
+        "do not own",
+        "no longer active",
+        "outside the plan",
+        "must be divisible",
+        "must be greater",
+        "Payment proof is required",
+        "valid start date is required",
       ];
+
       if (clientErrors.some((msg) => error.message?.includes(msg))) {
         res.status(400).json({ success: false, error: error.message });
       } else {
-        logger.error("Pay contribution error:", error);
+        logger.error("Create payment submission error:", error);
         res.status(500).json({ success: false, error: "Internal server error" });
       }
     }
   }
 
   /**
-   * PATCH /api/contributions/:id/approve
-   * Admin approves a contribution after verifying payment.
+   * PATCH /api/contributions/submissions/:id/approve
    */
   static async approveContribution(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const id = req.params.id as string;
-      const contribution = await ContributionService.approveContribution(id, req.user!.userId);
+      const result = await ContributionAllocationService.approveSubmission(id, req.user!.userId);
 
       res.status(200).json({
         success: true,
-        message: "Contribution verified and approved",
-        contribution,
+        message: `${result.allocatedContributions.length} contribution day${result.allocatedContributions.length !== 1 ? "s" : ""} allocated successfully`,
+        ...result,
       });
     } catch (error: any) {
-      if (error.message === "Contribution not found") {
+      // Detailed logging for debugging 500 errors
+      logger.error(`Approve payment submission error [${req.params.id}]:`, {
+        message: error.message,
+        stack: error.stack,
+        userId: req.user?.userId
+      });
+
+      if (error.message === "Payment submission not found") {
         res.status(404).json({ success: false, error: error.message });
-      } else if (error.message?.includes("Already")) {
+      } else if (
+        error.message?.includes("already") ||
+        error.message?.includes("Not enough payable") ||
+        error.message?.includes("outside the plan")
+      ) {
         res.status(400).json({ success: false, error: error.message });
       } else {
-        logger.error("Approve contribution error:", error);
-        res.status(500).json({ success: false, error: "Internal server error" });
+        res.status(500).json({ success: false, error: "Internal server error: " + error.message });
       }
     }
   }
 
   /**
-   * PATCH /api/contributions/:id/reject
-   * Admin rejects a contribution.
+   * PATCH /api/contributions/submissions/:id/reject
    */
   static async rejectContribution(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const id = req.params.id as string;
       const { reason } = req.body;
-
-      const contribution = await ContributionService.rejectContribution(
-        id,
-        req.user!.userId,
-        reason
-      );
+      const submission = await ContributionAllocationService.rejectSubmission(id, req.user!.userId, reason);
 
       res.status(200).json({
         success: true,
-        message: "Contribution rejected",
-        contribution,
+        message: "Payment submission rejected",
+        submission,
       });
     } catch (error: any) {
-      if (error.message === "Contribution not found") {
+      if (error.message === "Payment submission not found") {
         res.status(404).json({ success: false, error: error.message });
-      } else if (error.message?.includes("Cannot reject")) {
+      } else if (error.message?.includes("already")) {
         res.status(400).json({ success: false, error: error.message });
       } else {
-        logger.error("Reject contribution error:", error);
-        res.status(500).json({ success: false, error: "Internal server error" });
-      }
-    }
-  }
-
-  /**
-   * PATCH /api/contributions/batch/:batchId/approve
-   * Admin approves all pending contributions in a batch.
-   */
-  static async approveBatch(req: AuthenticatedRequest, res: Response): Promise<void> {
-    try {
-      const batchId = req.params.batchId as string;
-      const result = await ContributionService.approveBatch(batchId, req.user!.userId);
-
-      res.status(200).json({
-        success: true,
-        message: `${result.approvedCount} contributions approved`,
-        ...result,
-      });
-    } catch (error: any) {
-      if (error.message?.includes("No pending")) {
-        res.status(404).json({ success: false, error: error.message });
-      } else {
-        logger.error("Approve batch error:", error);
-        res.status(500).json({ success: false, error: "Internal server error" });
-      }
-    }
-  }
-
-  /**
-   * PATCH /api/contributions/batch/:batchId/reject
-   * Admin rejects all pending contributions in a batch.
-   */
-  static async rejectBatch(req: AuthenticatedRequest, res: Response): Promise<void> {
-    try {
-      const batchId = req.params.batchId as string;
-      const { reason } = req.body;
-      const result = await ContributionService.rejectBatch(batchId, req.user!.userId, reason);
-
-      res.status(200).json({
-        success: true,
-        message: `${result.rejectedCount} contributions rejected`,
-        ...result,
-      });
-    } catch (error: any) {
-      if (error.message?.includes("No pending")) {
-        res.status(404).json({ success: false, error: error.message });
-      } else {
-        logger.error("Reject batch error:", error);
+        logger.error("Reject payment submission error:", error);
         res.status(500).json({ success: false, error: "Internal server error" });
       }
     }
@@ -159,18 +131,42 @@ export class ContributionController {
 
   /**
    * GET /api/contributions/my
-   * Get user's contributions. Optional ?planId= filter.
    */
   static async getUserContributions(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const planId = req.query.planId as string | undefined;
-      const contributions = await ContributionService.getUserContributions(
-        req.user!.userId,
-        planId
-      );
+      const contributions = await ContributionService.getUserContributions(req.user!.userId, planId);
       res.status(200).json({ success: true, contributions });
     } catch (error: any) {
       logger.error("Get user contributions error:", error);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  }
+
+  /**
+   * GET /api/contributions/submissions/my
+   */
+  static async getUserPaymentSubmissions(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const planId = req.query.planId as string | undefined;
+      const submissions = await PaymentSubmissionService.getUserSubmissions(req.user!.userId, planId);
+      res.status(200).json({ success: true, submissions });
+    } catch (error: any) {
+      logger.error("Get user payment submissions error:", error);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  }
+
+  /**
+   * GET /api/contributions/submissions?status=PENDING
+   */
+  static async getAdminPaymentSubmissions(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const status = req.query.status as string | undefined;
+      const submissions = await PaymentSubmissionService.getAdminSubmissions(status);
+      res.status(200).json({ success: true, submissions });
+    } catch (error: any) {
+      logger.error("Get admin payment submissions error:", error);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   }

@@ -9,6 +9,7 @@ const router = Router();
 router.use(authenticateToken as any);
 
 // User routes
+router.get("/my", WithdrawalController.getMyWithdrawals as any);
 router.post("/request", WithdrawalController.requestWithdrawal as any);
 
 // Admin-only

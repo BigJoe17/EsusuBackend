@@ -35,19 +35,22 @@ export const authenticateToken = async (
     }
 
     let role = decoded.role;
-    if (!role) {
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        select: { role: true },
-      });
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: { role: true, isSuspended: true },
+    });
 
-      if (!user) {
-        res.status(403).json({ success: false, error: "Invalid or expired token" });
-        return;
-      }
-      role = user.role;
+    if (!user) {
+      res.status(403).json({ success: false, error: "Invalid or expired token" });
+      return;
     }
 
+    if (user.isSuspended) {
+      res.status(403).json({ success: false, error: "Account suspended" });
+      return;
+    }
+
+    role = role || user.role;
     req.user = { userId: decoded.userId, role };
     next();
   } catch (error) {

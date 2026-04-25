@@ -5,6 +5,19 @@ import { logger } from "../../utils/logger";
 
 export class WithdrawalController {
   /**
+   * GET /api/withdrawals/my
+   */
+  static async getMyWithdrawals(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const withdrawals = await WithdrawalService.getUserWithdrawals(req.user!.userId);
+      res.status(200).json({ success: true, withdrawals });
+    } catch (error: any) {
+      logger.error("Get my withdrawals error:", error);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  }
+
+  /**
    * POST /api/withdrawals/request
    */
   static async requestWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
