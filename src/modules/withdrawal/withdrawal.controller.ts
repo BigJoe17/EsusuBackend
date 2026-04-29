@@ -4,9 +4,6 @@ import { WithdrawalService } from "./withdrawal.service";
 import { logger } from "../../utils/logger";
 
 export class WithdrawalController {
-  /**
-   * GET /api/withdrawals/my
-   */
   static async getMyWithdrawals(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const withdrawals = await WithdrawalService.getUserWithdrawals(req.user!.userId);
@@ -17,25 +14,20 @@ export class WithdrawalController {
     }
   }
 
-  /**
-   * POST /api/withdrawals/request
-   */
   static async requestWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { planId, amount } = req.body;
+      const { planId, amount, method } = req.body;
 
       if (!planId || !amount) {
-        res.status(400).json({
-          success: false,
-          error: "planId and amount are required",
-        });
+        res.status(400).json({ success: false, error: "planId and amount are required" });
         return;
       }
 
       const withdrawal = await WithdrawalService.requestWithdrawal(
         req.user!.userId,
         planId,
-        parseFloat(amount)
+        parseFloat(amount),
+        method?.toUpperCase() || "TRANSFER"
       );
 
       res.status(201).json({
@@ -49,6 +41,7 @@ export class WithdrawalController {
         "do not own",
         "must be greater",
         "Insufficient balance",
+        "bank account first"
       ];
       if (clientErrors.some((msg) => error.message?.includes(msg))) {
         res.status(400).json({ success: false, error: error.message });
@@ -59,51 +52,70 @@ export class WithdrawalController {
     }
   }
 
-  /**
-   * PATCH /api/withdrawals/:id/approve
-   */
-  static async approveWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
+  static async acceptWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const id = req.params.id as string;
-      const withdrawal = await WithdrawalService.approveWithdrawal(id);
-
-      res.status(200).json({
-        success: true,
-        message: "Withdrawal approved",
-        withdrawal,
-      });
+      const withdrawal = await WithdrawalService.acceptWithdrawal(req.params.id as string);
+      res.status(200).json({ success: true, message: "Withdrawal accepted", withdrawal });
     } catch (error: any) {
-      if (error.message === "Withdrawal not found") {
-        res.status(404).json({ success: false, error: error.message });
-      } else if (error.message?.includes("already")) {
-        res.status(400).json({ success: false, error: error.message });
-      } else {
-        logger.error("Approve withdrawal error:", error);
-        res.status(500).json({ success: false, error: "Internal server error" });
-      }
+      res.status(error.message.includes("not found") ? 404 : 400).json({ success: false, error: error.message });
     }
   }
 
-  /**
-   * PATCH /api/withdrawals/:id/reject
-   */
+  static async processWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const withdrawal = await WithdrawalService.processWithdrawal(req.params.id as string);
+      res.status(200).json({ success: true, message: "Withdrawal processing", withdrawal });
+    } catch (error: any) {
+      res.status(error.message.includes("not found") ? 404 : 400).json({ success: false, error: error.message });
+    }
+  }
+
+  static async markReadyForPickup(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const withdrawal = await WithdrawalService.markReadyForPickup(req.params.id as string);
+      res.status(200).json({ success: true, message: "Marked ready for pickup", withdrawal });
+    } catch (error: any) {
+      res.status(error.message.includes("not found") ? 404 : 400).json({ success: false, error: error.message });
+    }
+  }
+
+  static async markTransferSent(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { reference } = req.body;
+      const withdrawal = await WithdrawalService.markTransferSent(req.params.id as string, reference);
+      res.status(200).json({ success: true, message: "Transfer marked as sent", withdrawal });
+    } catch (error: any) {
+      res.status(error.message.includes("not found") ? 404 : 400).json({ success: false, error: error.message });
+    }
+  }
+
+  static async completeWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { otp } = req.body;
+      const withdrawal = await WithdrawalService.completeWithdrawal(req.params.id as string, otp);
+      res.status(200).json({ success: true, message: "Withdrawal completed", withdrawal });
+    } catch (error: any) {
+      res.status(error.message.includes("not found") ? 404 : 400).json({ success: false, error: error.message });
+    }
+  }
+
+  static async holdWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { note } = req.body;
+      const withdrawal = await WithdrawalService.holdWithdrawal(req.params.id as string, note);
+      res.status(200).json({ success: true, message: "Withdrawal placed on hold", withdrawal });
+    } catch (error: any) {
+      res.status(error.message.includes("not found") ? 404 : 400).json({ success: false, error: error.message });
+    }
+  }
+
   static async rejectWithdrawal(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const id = req.params.id as string;
-      const withdrawal = await WithdrawalService.rejectWithdrawal(id);
-
-      res.status(200).json({
-        success: true,
-        message: "Withdrawal rejected",
-        withdrawal,
-      });
+      const { reason } = req.body;
+      const withdrawal = await WithdrawalService.rejectWithdrawal(req.params.id as string, reason);
+      res.status(200).json({ success: true, message: "Withdrawal rejected", withdrawal });
     } catch (error: any) {
-      if (error.message === "Withdrawal not found") {
-        res.status(404).json({ success: false, error: error.message });
-      } else {
-        logger.error("Reject withdrawal error:", error);
-        res.status(500).json({ success: false, error: "Internal server error" });
-      }
+      res.status(error.message.includes("not found") ? 404 : 400).json({ success: false, error: error.message });
     }
   }
 }

@@ -300,4 +300,45 @@ export class AuthController {
       }
     }
   }
+
+  /**
+   * POST /api/auth/refresh
+   * Rotate access token using a valid refresh token.
+   */
+  static async refresh(req: Request, res: Response): Promise<void> {
+    try {
+      const { refreshToken } = req.body;
+      if (!refreshToken) {
+        res.status(400).json({ success: false, error: "Refresh token is required" });
+        return;
+      }
+
+      const result = await AuthService.refreshSession(refreshToken);
+      res.status(200).json({ success: true, ...result });
+    } catch (error: any) {
+      if (error instanceof AuthorizationError) {
+        res.status(401).json({ success: false, error: error.message });
+      } else {
+        logger.error("Refresh token error:", error);
+        res.status(500).json({ success: false, error: "Internal server error" });
+      }
+    }
+  }
+
+  /**
+   * POST /api/auth/logout
+   * Logout user by invalidating their refresh token.
+   */
+  static async logout(req: Request, res: Response): Promise<void> {
+    try {
+      const { refreshToken } = req.body;
+      if (refreshToken) {
+        await AuthService.logout(refreshToken);
+      }
+      res.status(200).json({ success: true, message: "Logged out successfully" });
+    } catch (error: any) {
+      logger.error("Logout error:", error);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  }
 }

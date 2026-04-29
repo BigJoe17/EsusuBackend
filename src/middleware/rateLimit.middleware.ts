@@ -6,7 +6,7 @@
 import { Request, Response, NextFunction } from "express";
 
 interface RateLimitStore {
-  [ip: string]: { requests: number; resetTime: number };
+  [key: string]: { requests: number; resetTime: number };
 }
 
 const store: RateLimitStore = {};
@@ -14,36 +14,40 @@ const store: RateLimitStore = {};
 interface RateLimitOptions {
   windowMs: number; // Time window in milliseconds
   maxRequests: number; // Max requests per window
+  keyGenerator?: (req: Request) => string; // Custom key (default: IP)
 }
 
 export function rateLimit(options: RateLimitOptions) {
-  const { windowMs, maxRequests } = options;
+  const { windowMs, maxRequests, keyGenerator } = options;
 
   return (req: Request, res: Response, next: NextFunction): void => {
     const ip = req.ip || req.socket.remoteAddress || "unknown";
+    // Use path-based key so /auth/login and /auth/me have separate counters
+    const key = keyGenerator ? keyGenerator(req) : `${ip}:${req.path}`;
     const now = Date.now();
 
     // Initialize or get existing rate limit data
-    if (!store[ip] || now > store[ip].resetTime) {
-      store[ip] = {
+    if (!store[key] || now > store[key].resetTime) {
+      store[key] = {
         requests: 0,
         resetTime: now + windowMs,
       };
     }
 
-    store[ip].requests++;
+    store[key].requests++;
 
     // Set rate limit headers
     res.setHeader("X-RateLimit-Limit", maxRequests);
-    res.setHeader("X-RateLimit-Remaining", Math.max(0, maxRequests - store[ip].requests));
-    res.setHeader("X-RateLimit-Reset", new Date(store[ip].resetTime).toISOString());
+    res.setHeader("X-RateLimit-Remaining", Math.max(0, maxRequests - store[key].requests));
+    res.setHeader("X-RateLimit-Reset", new Date(store[key].resetTime).toISOString());
 
     // Check if limit exceeded
-    if (store[ip].requests > maxRequests) {
+    if (store[key].requests > maxRequests) {
       res.status(429).json({
         success: false,
-        error: "Too many requests, please try again later",
-        retryAfter: Math.ceil((store[ip].resetTime - now) / 1000),
+        message: "Too many requests, please try again later",
+        code: "RATE_LIMIT_EXCEEDED",
+        retryAfter: Math.ceil((store[key].resetTime - now) / 1000),
       });
       return;
     }
@@ -53,22 +57,32 @@ export function rateLimit(options: RateLimitOptions) {
 }
 
 /**
- * Per-endpoint rate limiter
- * Use for sensitive endpoints like login, register
+ * Strict rate limiter (e.g. for Login, OTP, Withdrawals)
+ * 10 requests per 15 minutes per IP+path
  */
 export function strictRateLimit() {
   return rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    maxRequests: 5, // 5 requests per 15 minutes
+    maxRequests: 10,
   });
 }
 
 /**
- * General API rate limiter
+ * Moderate rate limiter (e.g. for general POST/PUT endpoints)
  */
-export function apiRateLimit() {
+export function moderateRateLimit() {
   return rateLimit({
     windowMs: 60 * 1000, // 1 minute
-    maxRequests: 60, // 60 requests per minute
+    maxRequests: 60,
+  });
+}
+
+/**
+ * Relaxed rate limiter (e.g. for general GET endpoints)
+ */
+export function relaxedRateLimit() {
+  return rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    maxRequests: 200,
   });
 }

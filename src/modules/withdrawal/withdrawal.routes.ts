@@ -12,8 +12,13 @@ router.use(authenticateToken as any);
 router.get("/my", WithdrawalController.getMyWithdrawals as any);
 router.post("/request", WithdrawalController.requestWithdrawal as any);
 
-// Admin-only
-router.patch("/:id/approve", requireAdmin as any, WithdrawalController.approveWithdrawal as any);
+// Admin-only transitions
+router.patch("/:id/accept", requireAdmin as any, WithdrawalController.acceptWithdrawal as any);
+router.patch("/:id/process", requireAdmin as any, WithdrawalController.processWithdrawal as any);
+router.patch("/:id/ready-for-pickup", requireAdmin as any, WithdrawalController.markReadyForPickup as any);
+router.patch("/:id/transfer-sent", requireAdmin as any, WithdrawalController.markTransferSent as any);
+router.patch("/:id/complete", requireAdmin as any, WithdrawalController.completeWithdrawal as any);
+router.patch("/:id/hold", requireAdmin as any, WithdrawalController.holdWithdrawal as any);
 router.patch("/:id/reject", requireAdmin as any, WithdrawalController.rejectWithdrawal as any);
 
 export default router;

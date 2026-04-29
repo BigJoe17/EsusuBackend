@@ -199,7 +199,12 @@ export class PlanService {
     });
 
     const withdrawn = await prisma.withdrawal.aggregate({
-      where: { planId, status: "APPROVED" },
+      where: { planId, status: "COMPLETED" },
+      _sum: { amount: true },
+    });
+
+    const activeWithdrawals = await prisma.withdrawal.aggregate({
+      where: { planId, status: { notIn: ["REJECTED"] } },
       _sum: { amount: true },
     });
 
@@ -221,7 +226,7 @@ export class PlanService {
         totalBusinessFees: businessFees._sum.amount || 0,
         feeDays: businessFees._count,
         totalWithdrawn: withdrawn._sum.amount || 0,
-        availableBalance: (approved._sum.amount || 0) - (withdrawn._sum.amount || 0),
+        availableBalance: (approved._sum.amount || 0) - (activeWithdrawals._sum.amount || 0),
       },
       paymentSubmissions: plan.paymentSubmissions,
       withdrawals: plan.withdrawals,

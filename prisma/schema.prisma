@@ -45,8 +45,13 @@ enum ContributionAllocationType {
 
 enum WithdrawalStatus {
   PENDING
-  APPROVED
+  ACCEPTED
+  PROCESSING
+  READY_FOR_PICKUP
+  TRANSFER_SENT
+  COMPLETED
   REJECTED
+  ON_HOLD
 }
 
 enum EarningSource {
@@ -87,6 +92,7 @@ model User {
   paymentSubmissions    PaymentSubmission[] @relation("PaymentSubmissionUser")
   reviewedSubmissions   PaymentSubmission[] @relation("PaymentSubmissionReviewer")
   bankAccount           BankAccount?
+  refreshTokens         RefreshToken[]
 }
 
 model OtpCode {
@@ -95,6 +101,18 @@ model OtpCode {
   userId    String
   expiresAt DateTime
   used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -185,11 +203,34 @@ model Withdrawal {
   planId    String
   amount    Float
   status    WithdrawalStatus @default(PENDING)
+  method    PaymentMethod    @default(TRANSFER)
+  
+  // OTP for cash pickup
+  pickupOtp      String?
+  otpExpiresAt   DateTime?
+  otpVerifiedAt  DateTime?
+
+  // Transfer reference
+  reference      String?
+
+  // Audit timestamps
+  acceptedAt     DateTime?
+  processingAt   DateTime?
+  readyForPickupAt DateTime?
+  transferSentAt DateTime?
+  completedAt    DateTime?
+  rejectedAt     DateTime?
+  holdAt         DateTime?
+  
+  adminNote      String?
+
   createdAt DateTime         @default(now())
+  updatedAt DateTime         @default(now()) @updatedAt
 
   plan SavingsPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   @@index([planId])
+  @@index([status])
 }
 
 model AdminEarning {

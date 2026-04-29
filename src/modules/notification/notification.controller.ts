@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../../middleware/auth.middleware';
 import prisma from '../../utils/prisma';
 import { logger } from '../../utils/logger';
+import { getPaginationParams, createPaginatedResponse } from '../../utils/pagination.util';
 
 export class NotificationController {
   /**
@@ -9,13 +10,21 @@ export class NotificationController {
    */
   static async getMyNotifications(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      const { page, limit, skip } = getPaginationParams(req.query);
       const userId = req.user!.userId;
-      const notifications = await prisma.notification.findMany({
-        where: { userId },
-        orderBy: { createdAt: 'desc' },
-      });
 
-      res.status(200).json({ success: true, notifications });
+      const [notifications, total] = await Promise.all([
+        prisma.notification.findMany({
+          skip,
+          take: limit,
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+        }),
+        prisma.notification.count({ where: { userId } }),
+      ]);
+
+      const paginated = createPaginatedResponse(notifications, total, { page, limit, skip });
+      res.status(200).json({ success: true, notifications: paginated.data, meta: paginated.meta });
     } catch (error: any) {
       logger.error('Get notifications error:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });

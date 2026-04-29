@@ -1,99 +1,35 @@
-/**
- * Application Logger
- * Provides structured logging with different log levels
- */
+import winston from "winston";
+import { config } from "../config/env";
 
-type LogLevel = "debug" | "info" | "warn" | "error";
+const { combine, timestamp, printf, colorize, errors } = winston.format;
 
-interface LogEntry {
-  timestamp: string;
-  level: LogLevel;
-  message: string;
-  data?: any;
-  error?: any;
-}
-
-class Logger {
-  private level: LogLevel = "info";
-
-  constructor(level: LogLevel = "info") {
-    this.level = level;
+const customFormat = printf(({ level, message, timestamp, stack, ...meta }) => {
+  let log = `[${timestamp}] ${level}: ${message}`;
+  
+  if (Object.keys(meta).length) {
+    log += ` ${JSON.stringify(meta)}`;
   }
-
-  private formatLog(entry: LogEntry): string {
-    const { timestamp, level, message, data, error } = entry;
-    let log = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
-
-    if (data) {
-      log += ` ${JSON.stringify(data)}`;
-    }
-
-    if (error) {
-      log += `\n${error.stack || error.message || JSON.stringify(error)}`;
-    }
-
-    return log;
+  
+  if (stack) {
+    log += `\n${stack}`;
   }
+  
+  return log;
+});
 
-  private shouldLog(level: LogLevel): boolean {
-    const levels: LogLevel[] = ["debug", "info", "warn", "error"];
-    return levels.indexOf(level) >= levels.indexOf(this.level);
-  }
-
-  debug(message: string, data?: any): void {
-    if (this.shouldLog("debug")) {
-      console.log(
-        this.formatLog({
-          timestamp: new Date().toISOString(),
-          level: "debug",
-          message,
-          data,
-        })
-      );
-    }
-  }
-
-  info(message: string, data?: any): void {
-    if (this.shouldLog("info")) {
-      console.log(
-        this.formatLog({
-          timestamp: new Date().toISOString(),
-          level: "info",
-          message,
-          data,
-        })
-      );
-    }
-  }
-
-  warn(message: string, data?: any): void {
-    if (this.shouldLog("warn")) {
-      console.warn(
-        this.formatLog({
-          timestamp: new Date().toISOString(),
-          level: "warn",
-          message,
-          data,
-        })
-      );
-    }
-  }
-
-  error(message: string, error?: Error | any, data?: any): void {
-    if (this.shouldLog("error")) {
-      console.error(
-        this.formatLog({
-          timestamp: new Date().toISOString(),
-          level: "error",
-          message,
-          error,
-          data,
-        })
-      );
-    }
-  }
-}
-
-export const logger = new Logger(
-  (process.env.LOG_LEVEL as LogLevel) || "info"
-);
+export const logger = winston.createLogger({
+  level: config.LOG_LEVEL || "info",
+  format: combine(
+    errors({ stack: true }),
+    timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
+    customFormat
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: combine(
+        colorize(),
+        customFormat
+      ),
+    }),
+  ],
+});

@@ -6,6 +6,7 @@
 interface EnvConfig {
   DATABASE_URL: string;
   JWT_SECRET: string;
+  JWT_REFRESH_SECRET: string;
   NODE_ENV: "development" | "production" | "test";
   PORT: number;
   SMTP_HOST: string;
@@ -25,6 +26,7 @@ export function validateEnv(): EnvConfig {
   const requiredVars = [
     "DATABASE_URL",
     "JWT_SECRET",
+    "JWT_REFRESH_SECRET",
     "NODE_ENV",
   ];
 
@@ -37,6 +39,7 @@ export function validateEnv(): EnvConfig {
   return {
     DATABASE_URL: process.env.DATABASE_URL!,
     JWT_SECRET: process.env.JWT_SECRET!,
+    JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || "dev-refresh-secret-key-change-in-production",
     NODE_ENV: (process.env.NODE_ENV as "development" | "production" | "test") || "development",
     PORT: parseInt(process.env.PORT || "5000"),
     SMTP_HOST: process.env.SMTP_HOST || "smtp.ethereal.email",

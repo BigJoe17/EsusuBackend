@@ -113,7 +113,8 @@ export const errorHandler = (
 
   res.status(statusCode).json({
     success: false,
-    error: message,
+    message,
+    code: err.code || "INTERNAL_ERROR",
     ...(errors && { errors }),
     ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
   });
@@ -126,7 +127,8 @@ export const notFoundHandler = (req: Request, res: Response): void => {
   logger.warn("Route not found", { method: req.method, path: req.originalUrl });
   res.status(404).json({
     success: false,
-    error: "Endpoint not found",
+    message: "Endpoint not found",
+    code: "NOT_FOUND",
     path: req.originalUrl,
   });
 };

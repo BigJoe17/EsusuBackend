@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from "../../middleware/auth.middleware";
 import prisma from "../../utils/prisma";
 import { logger } from "../../utils/logger";
 import { getProjectedAdminEarnings } from "../../utils/business-rules";
+import { getPaginationParams, createPaginatedResponse } from "../../utils/pagination.util";
 
 export class AdminController {
   /**
@@ -10,23 +11,31 @@ export class AdminController {
    */
   static async getUsers(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const users = await prisma.user.findMany({
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          isVerified: true,
-          isSuspended: true,
-          createdAt: true,
-          _count: {
-            select: { plans: true },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      });
+      const { page, limit, skip } = getPaginationParams(req.query);
 
-      res.status(200).json({ success: true, users });
+      const [users, total] = await Promise.all([
+        prisma.user.findMany({
+          skip,
+          take: limit,
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            isVerified: true,
+            isSuspended: true,
+            createdAt: true,
+            _count: {
+              select: { plans: true },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.user.count(),
+      ]);
+
+      const paginated = createPaginatedResponse(users, total, { page, limit, skip });
+      res.status(200).json({ success: true, users: paginated.data, meta: paginated.meta });
     } catch (error: any) {
       logger.error("Get users error:", error);
       res.status(500).json({ success: false, error: "Internal server error" });
@@ -38,26 +47,33 @@ export class AdminController {
    */
   static async getPlans(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      const { page, limit, skip } = getPaginationParams(req.query);
       const status = req.query.status as string | undefined;
       const where: any = {};
       if (status) {
         where.status = status.toUpperCase();
       }
 
-      const plans = await prisma.savingsPlan.findMany({
-        where,
-        include: {
-          user: {
-            select: { id: true, name: true, email: true },
+      const [plans, total] = await Promise.all([
+        prisma.savingsPlan.findMany({
+          skip,
+          take: limit,
+          where,
+          include: {
+            user: {
+              select: { id: true, name: true, email: true },
+            },
+            _count: {
+              select: { contributions: true, withdrawals: true },
+            },
           },
-          _count: {
-            select: { contributions: true, withdrawals: true },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      });
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.savingsPlan.count({ where }),
+      ]);
 
-      res.status(200).json({ success: true, plans });
+      const paginated = createPaginatedResponse(plans, total, { page, limit, skip });
+      res.status(200).json({ success: true, plans: paginated.data, meta: paginated.meta });
     } catch (error: any) {
       logger.error("Get admin plans error:", error);
       res.status(500).json({ success: false, error: "Internal server error" });
@@ -69,36 +85,43 @@ export class AdminController {
    */
   static async getContributions(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      const { page, limit, skip } = getPaginationParams(req.query);
       const status = req.query.status as string | undefined;
       const where: any = {};
       if (status) {
         where.status = status.toUpperCase();
       }
 
-      const contributions = await prisma.contribution.findMany({
-        where,
-        orderBy: { date: "desc" },
-        include: {
-          plan: {
-            select: {
-              id: true,
-              dailyAmount: true,
-              user: { select: { id: true, name: true, email: true } },
+      const [contributions, total] = await Promise.all([
+        prisma.contribution.findMany({
+          skip,
+          take: limit,
+          where,
+          orderBy: { date: "desc" },
+          include: {
+            plan: {
+              select: {
+                id: true,
+                dailyAmount: true,
+                user: { select: { id: true, name: true, email: true } },
+              },
+            },
+            paymentSubmission: {
+              select: {
+                id: true,
+                amount: true,
+                method: true,
+                selectedStartDate: true,
+                submittedAt: true,
+              },
             },
           },
-          paymentSubmission: {
-            select: {
-              id: true,
-              amount: true,
-              method: true,
-              selectedStartDate: true,
-              submittedAt: true,
-            },
-          },
-        },
-      });
+        }),
+        prisma.contribution.count({ where }),
+      ]);
 
-      res.status(200).json({ success: true, contributions });
+      const paginated = createPaginatedResponse(contributions, total, { page, limit, skip });
+      res.status(200).json({ success: true, contributions: paginated.data, meta: paginated.meta });
     } catch (error: any) {
       logger.error("Get admin contributions error:", error);
       res.status(500).json({ success: false, error: "Internal server error" });
@@ -110,41 +133,48 @@ export class AdminController {
    */
   static async getWithdrawals(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      const { page, limit, skip } = getPaginationParams(req.query);
       const status = req.query.status as string | undefined;
       const where: any = {};
       if (status) {
         where.status = status.toUpperCase();
       }
 
-      const withdrawals = await prisma.withdrawal.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        include: {
-          plan: {
-            select: {
-              id: true,
-              dailyAmount: true,
-              durationMonths: true,
-              user: { 
-                select: { 
-                  id: true, 
-                  name: true, 
-                  email: true,
-                  bankAccount: {
-                    select: {
-                      bankName: true,
-                      accountNumber: true,
-                      accountName: true,
+      const [withdrawals, total] = await Promise.all([
+        prisma.withdrawal.findMany({
+          skip,
+          take: limit,
+          where,
+          orderBy: { createdAt: "desc" },
+          include: {
+            plan: {
+              select: {
+                id: true,
+                dailyAmount: true,
+                durationMonths: true,
+                user: { 
+                  select: { 
+                    id: true, 
+                    name: true, 
+                    email: true,
+                    bankAccount: {
+                      select: {
+                        bankName: true,
+                        accountNumber: true,
+                        accountName: true,
+                      }
                     }
-                  }
-                } 
+                  } 
+                },
               },
             },
           },
-        },
-      });
+        }),
+        prisma.withdrawal.count({ where }),
+      ]);
 
-      res.status(200).json({ success: true, withdrawals });
+      const paginated = createPaginatedResponse(withdrawals, total, { page, limit, skip });
+      res.status(200).json({ success: true, withdrawals: paginated.data, meta: paginated.meta });
     } catch (error: any) {
       logger.error("Get admin withdrawals error:", error);
       res.status(500).json({ success: false, error: "Internal server error" });
@@ -206,66 +236,84 @@ export class AdminController {
    */
   static async getEarnings(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const [plans, feeContributions, penalties] = await Promise.all([
-        prisma.savingsPlan.findMany({
-          include: {
-            user: { select: { id: true, name: true, email: true } },
-          },
-        }),
-        prisma.contribution.findMany({
-          where: {
-            status: "APPROVED",
-            allocationType: "BUSINESS_FEE",
-          },
-          include: {
-            plan: {
-              include: {
-                user: { select: { id: true, name: true, email: true } },
-              },
-            },
-          },
+      const { page, limit, skip } = getPaginationParams(req.query);
+
+      // 1. Aggregations for total earnings
+      const [feeEarningsResult, penaltiesResult, projectedEarningsResult, totalPlans, activePlansCount] = await Promise.all([
+        prisma.contribution.aggregate({
+          where: { status: "APPROVED", allocationType: "BUSINESS_FEE" },
+          _sum: { amount: true },
         }),
         prisma.adminEarning.aggregate({
           where: { sourceType: "PENALTY" },
           _sum: { amount: true },
         }),
+        prisma.$queryRaw<{ total: number }[]>`
+          SELECT SUM("durationMonths" * "dailyAmount")::float as total
+          FROM "SavingsPlan"
+          WHERE "isActive" = true
+        `,
+        prisma.savingsPlan.count(),
+        prisma.savingsPlan.count({ where: { isActive: true } }),
       ]);
 
-      const totalFeeEarnings = feeContributions.reduce((sum, contribution) => sum + contribution.amount, 0);
-      const penaltyEarnings = penalties._sum.amount || 0;
+      const totalFeeEarnings = feeEarningsResult._sum.amount || 0;
+      const penaltyEarnings = penaltiesResult._sum.amount || 0;
       const totalAdminEarnings = totalFeeEarnings + penaltyEarnings;
+      const projectedTotalEarnings = projectedEarningsResult[0]?.total || 0;
+
+      // 2. Paginated breakdown
+      const plans = await prisma.savingsPlan.findMany({
+        skip,
+        take: limit,
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      const planIds = plans.map(p => p.id);
+
+      const feeContributions = await prisma.contribution.groupBy({
+        by: ['planId'],
+        where: {
+          planId: { in: planIds },
+          status: "APPROVED",
+          allocationType: "BUSINESS_FEE",
+        },
+        _sum: { amount: true },
+        _count: { id: true }
+      });
+
+      const feeContributionsMap = new Map(
+        feeContributions.map(c => [c.planId, c])
+      );
 
       const planEarnings = plans.map((plan) => {
-        const planFeeContributions = feeContributions.filter((contribution) => contribution.planId === plan.id);
-        const earnings = planFeeContributions.reduce((sum, contribution) => sum + contribution.amount, 0);
+        const stats = feeContributionsMap.get(plan.id);
         return {
           planId: plan.id,
           user: plan.user,
           dailyAmount: plan.dailyAmount,
           durationMonths: plan.durationMonths,
-          completedCycles: planFeeContributions.length,
-          adminEarnings: earnings,
+          completedCycles: stats?._count.id || 0,
+          adminEarnings: stats?._sum.amount || 0,
           status: plan.status,
         };
       });
 
-      // Total future earnings projection
-      const activePlans = plans.filter((p) => p.isActive);
-      let projectedTotalEarnings = 0;
-      for (const plan of activePlans) {
-        projectedTotalEarnings += getProjectedAdminEarnings(plan.durationMonths, plan.dailyAmount);
-      }
-
-      res.status(200).json({
-        success: true,
-        totalAdminEarnings,
-        totalFeeEarnings,
-        penaltyEarnings,
-        projectedTotalEarnings,
-        activePlansCount: activePlans.length,
-        totalPlansCount: plans.length,
-        breakdown: planEarnings,
-      });
+        const paginated = createPaginatedResponse(planEarnings, totalPlans, { page, limit, skip });
+        res.status(200).json({
+          success: true,
+          totalAdminEarnings,
+          totalFeeEarnings,
+          penaltyEarnings,
+          projectedTotalEarnings,
+          activePlansCount,
+          totalPlansCount: totalPlans,
+          breakdown: paginated.data,
+          meta: paginated.meta,
+        });
     } catch (error: any) {
       logger.error("Get admin earnings error:", error);
       res.status(500).json({ success: false, error: "Internal server error" });
@@ -396,15 +444,34 @@ export class AdminController {
 
   /**
    * GET /api/admin/users/:id
-   * Fetch specific user deep profile
+   * Fetch specific user deep profile with pre-computed financial stats
    */
   static async getUserById(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const id = req.params.id as string;
+
+      if (!id || id === 'undefined') {
+        res.status(400).json({ success: false, error: "Invalid user ID" });
+        return;
+      }
+
       const user = await prisma.user.findUnique({
         where: { id },
         select: {
-          id: true, email: true, name: true, isVerified: true, isSuspended: true, createdAt: true,
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          isVerified: true,
+          isSuspended: true,
+          createdAt: true,
+          bankAccount: {
+            select: {
+              bankName: true,
+              accountNumber: true,
+              accountName: true,
+            }
+          },
           plans: {
             include: {
               contributions: { orderBy: { date: "asc" } },
@@ -413,11 +480,74 @@ export class AdminController {
           }
         }
       });
-      if(!user) {
+
+      if (!user) {
         res.status(404).json({ success: false, error: "User not found" });
         return;
       }
-      res.status(200).json({ success: true, user });
+
+      // Pre-compute financial stats server-side so frontend doesn't need complex math
+      let totalSaved = 0;
+      let totalBusinessFees = 0;
+      let pendingWithdrawals = 0;
+      let completedWithdrawals = 0;
+      let totalWithdrawn = 0;
+      let approvedContributions = 0;
+      let pendingContributions = 0;
+      let missedContributions = 0;
+
+      const allWithdrawals: any[] = [];
+
+      for (const plan of user.plans) {
+        for (const contrib of plan.contributions) {
+          if (contrib.status === 'APPROVED') {
+            if (contrib.allocationType === 'BUSINESS_FEE') {
+              totalBusinessFees += contrib.amount;
+            } else {
+              totalSaved += contrib.amount;
+            }
+            approvedContributions++;
+          } else if (contrib.status === 'PENDING') {
+            pendingContributions++;
+          } else if (contrib.status === 'MISSED' || contrib.status === 'UNPAID') {
+            missedContributions++;
+          }
+        }
+
+        for (const withdrawal of plan.withdrawals) {
+          allWithdrawals.push({
+            ...withdrawal,
+            planDailyAmount: plan.dailyAmount,
+            planDurationMonths: plan.durationMonths,
+          });
+          if (withdrawal.status === 'PENDING' || withdrawal.status === 'ACCEPTED' || withdrawal.status === 'PROCESSING') {
+            pendingWithdrawals += withdrawal.amount;
+          } else if (withdrawal.status === 'COMPLETED') {
+            completedWithdrawals += withdrawal.amount;
+            totalWithdrawn += withdrawal.amount;
+          }
+        }
+      }
+
+      const availableBalance = totalSaved - totalWithdrawn - pendingWithdrawals;
+
+      res.status(200).json({
+        success: true,
+        user,
+        stats: {
+          totalSaved,
+          totalBusinessFees,
+          availableBalance: Math.max(0, availableBalance),
+          pendingWithdrawals,
+          completedWithdrawals,
+          approvedContributions,
+          pendingContributions,
+          missedContributions,
+          totalPlans: user.plans.length,
+          activePlans: user.plans.filter(p => p.isActive).length,
+        },
+        withdrawals: allWithdrawals,
+      });
     } catch (error: any) {
       logger.error("Get admin user by ID error:", error);
       res.status(500).json({ success: false, error: "Internal server error" });

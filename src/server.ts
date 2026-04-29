@@ -89,39 +89,26 @@ app.use(morgan("dev"));
 app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ limit: "10kb", extended: true }));
 
-// Global rate limiting (using battle-tested express-rate-limit)
-app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { success: false, error: "Too many requests, please try again later" },
-  })
-);
+import { strictRateLimit, moderateRateLimit, relaxedRateLimit } from "./middleware/rateLimit.middleware";
 
 // Health check route
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// Global API rate limiting
+app.use(relaxedRateLimit());
+
 // API Routes
-// Strict rate limit on auth in production
-app.use(
-  "/api/auth",
-  config.NODE_ENV === "production"
-    ? rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { success: false, error: "Too many auth attempts" } })
-    : (req: any, res: any, next: any) => next(),
-  authRoutes
-);
-app.use("/api/plans", planRoutes);
-app.use("/api/contributions", contributionRoutes);
-app.use("/api/withdrawals", withdrawalRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/notifications", notificationRoutes);
-app.use("/api/settings", settingsRoutes);
-app.use("/api/upload", uploadRoutes);
-app.use("/api/bank-account", bankAccountRoutes);
+app.use("/api/auth", strictRateLimit(), authRoutes);
+app.use("/api/plans", moderateRateLimit(), planRoutes);
+app.use("/api/contributions", moderateRateLimit(), contributionRoutes);
+app.use("/api/withdrawals", strictRateLimit(), withdrawalRoutes);
+app.use("/api/admin", moderateRateLimit(), adminRoutes);
+app.use("/api/notifications", relaxedRateLimit(), notificationRoutes);
+app.use("/api/settings", relaxedRateLimit(), settingsRoutes);
+app.use("/api/upload", moderateRateLimit(), uploadRoutes);
+app.use("/api/bank-account", moderateRateLimit(), bankAccountRoutes);
 
 
 // Catch 404 and forward to error handler

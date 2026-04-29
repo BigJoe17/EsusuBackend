@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import prisma from "../utils/prisma";
 import { generateOtpCode, hashOtp, compareOtp, getOtpExpiry } from "../utils/otp.util";
 import { sendOtpEmail, sendPasswordResetEmail } from "../utils/email.util";
@@ -10,6 +11,7 @@ import { AuthorizationError, ConflictError } from "../middleware/error.middlewar
 import { AppSettingsService } from "./app-settings.service";
 
 const JWT_SECRET = config.JWT_SECRET;
+const JWT_REFRESH_SECRET = config.JWT_REFRESH_SECRET;
 
 export class AuthService {
   /**
@@ -104,13 +106,14 @@ export class AuthService {
     }
 
     logger.info("User logged in successfully", { email });
-    const token = this.generateToken({ id: user.id, role: user.role });
+    const tokens = await this.generateTokens({ id: user.id, role: user.role });
 
     const { password: _, ...userWithoutPassword } = user;
 
     return {
       user: userWithoutPassword,
-      token,
+      token: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
       message: "Login successful",
     };
   }
@@ -174,13 +177,14 @@ export class AuthService {
     }
 
     logger.info("OTP verified, JWT token issued", { email });
-    const token = this.generateToken({ id: user.id, role: user.role });
+    const tokens = await this.generateTokens({ id: user.id, role: user.role });
 
     const { password: _, ...userWithoutPassword } = user;
 
     return {
       user: { ...userWithoutPassword, isVerified: true },
-      token,
+      token: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
       message: "Verification successful",
     };
   }
@@ -324,6 +328,65 @@ export class AuthService {
     return { message: "Password reset successfully. Please log in with your new password." };
   }
 
+  /**
+   * Refresh the access token using a valid refresh token.
+   */
+  static async refreshSession(refreshToken: string) {
+    if (!refreshToken) throw new AuthorizationError("Refresh token required");
+
+    try {
+      // Verify token signature first
+      const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as { userId: string };
+
+      // Verify token exists in DB and is not expired
+      const tokenRecord = await prisma.refreshToken.findUnique({
+        where: { token: refreshToken },
+        include: { user: true },
+      });
+
+      if (!tokenRecord || tokenRecord.expiresAt < new Date()) {
+        if (tokenRecord) {
+          await prisma.refreshToken.delete({ where: { id: tokenRecord.id } });
+        }
+        throw new AuthorizationError("Invalid or expired refresh token");
+      }
+
+      if (tokenRecord.user.isSuspended) {
+        throw new AuthorizationError("Account suspended");
+      }
+
+      // Rotate tokens (delete old, create new)
+      await prisma.refreshToken.delete({ where: { id: tokenRecord.id } });
+      const tokens = await this.generateTokens({ id: tokenRecord.user.id, role: tokenRecord.user.role });
+
+      return {
+        token: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      };
+    } catch (error) {
+      throw new AuthorizationError("Invalid refresh token");
+    }
+  }
+
+  /**
+   * Logout user by deleting their refresh token.
+   */
+  static async logout(refreshToken: string) {
+    if (!refreshToken) return;
+    try {
+      await prisma.refreshToken.delete({ where: { token: refreshToken } });
+    } catch (e) {
+      // Ignore if token doesn't exist
+    }
+  }
+
+  /**
+   * Logout from all devices
+   */
+  static async logoutAll(userId: string) {
+    await prisma.refreshToken.deleteMany({ where: { userId } });
+  }
+
   // ─── Private Helpers ────────────────────────────────────────────
 
   /**
@@ -349,9 +412,29 @@ export class AuthService {
     return code;
   }
 
-  private static generateToken(user: { id: string; role: string }): string {
-    return jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, {
+  private static async generateTokens(user: { id: string; role: string }) {
+    // Access token - short lived (15 minutes)
+    const accessToken = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, {
+      expiresIn: "15m",
+    });
+
+    // Refresh token - long lived (7 days)
+    const refreshTokenPayload = crypto.randomBytes(40).toString("hex");
+    const refreshToken = jwt.sign({ userId: user.id, jti: refreshTokenPayload }, JWT_REFRESH_SECRET, {
       expiresIn: "7d",
     });
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        expiresAt,
+      },
+    });
+
+    return { accessToken, refreshToken };
   }
 }

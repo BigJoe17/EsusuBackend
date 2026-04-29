@@ -11,7 +11,8 @@ router.post("/verify-otp", AuthController.verifyOtp);
 router.post("/resend-otp", AuthController.resendOtp);
 router.post("/forgot-password", AuthController.forgotPassword);
 router.post("/reset-password", AuthController.resetPassword);
-
+router.post("/refresh", AuthController.refresh);
+router.post("/logout", AuthController.logout);
 // ─── Protected Routes (JWT required) ───────────────────────────────
 router.get("/me", authenticateToken as any, AuthController.getProfile as any);
 router.patch("/change-password", authenticateToken as any, AuthController.changePassword as any);
